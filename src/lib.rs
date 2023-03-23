@@ -39,7 +39,7 @@ pub struct ValueInner<'a> {
     backward_fn: Option<&'a (dyn Fn(Value) + 'a)>,
     visited: Cell<bool>,
 
-    label: Cell<Option<&'a str>>,
+    label: Cell<Option<&'static str>>,
 }
 
 impl<'a> std::ops::Deref for Value<'a> {
@@ -82,11 +82,11 @@ impl<'a> Value<'a> {
         Self { inner, allocator }
     }
 
-    pub fn with_label(self, label: impl AsRef<str>) -> Self {
-        self.label
-            .set(Some(self.allocator.alloc_str(label.as_ref())));
-        self
-    }
+    // pub fn with_label(self, label: impl AsRef<str>) -> Self {
+    //     self.label
+    //         .set(Some(self.allocator.alloc_str(label.as_ref())));
+    //     self
+    // }
 
     pub fn data(self) -> f32 {
         self.data.get()
@@ -161,10 +161,15 @@ impl<'a> Value<'a> {
     }
 }
 
-impl std::ops::Add for Value<'_> {
+/// Value<'a> + Value<'b> = Value<'a>
+/// same for all the other binary operations
+impl<'a, 'b> std::ops::Add<Value<'b>> for Value<'a>
+where
+    'b: 'a,
+{
     type Output = Self;
 
-    fn add(self, other: Self) -> Self {
+    fn add(self, other: Value<'b>) -> Self {
         let value = self.data() + other.data();
         let creators = &[self, other];
         let backward_fn = move |out: Value| {
@@ -175,10 +180,13 @@ impl std::ops::Add for Value<'_> {
     }
 }
 
-impl std::ops::Sub for Value<'_> {
+impl<'a, 'b> std::ops::Sub<Value<'b>> for Value<'a>
+where
+    'b: 'a,
+{
     type Output = Self;
 
-    fn sub(self, other: Self) -> Self {
+    fn sub(self, other: Value<'b>) -> Self {
         let value = self.data() - other.data();
         let creators = &[self, other];
         let backward_fn = move |out: Value| {
@@ -189,10 +197,13 @@ impl std::ops::Sub for Value<'_> {
     }
 }
 
-impl std::ops::Mul for Value<'_> {
+impl<'a, 'b> std::ops::Mul<Value<'b>> for Value<'a>
+where
+    'b: 'a,
+{
     type Output = Self;
 
-    fn mul(self, other: Self) -> Self {
+    fn mul(self, other: Value<'b>) -> Self {
         let value = self.data() * other.data();
         let creators = &[self, other];
         let backward_fn = move |out: Value| {
@@ -251,10 +262,18 @@ impl<'a> Neuron<'a> {
         Self { weight, bias }
     }
 
-    pub fn forward(&self, input: impl IntoIterator<Item = Value<'a>>) -> Value<'a> {
+    pub fn forward<'b>(&self, input: impl IntoIterator<Item = Value<'b>>) -> Value<'b>
+    where
+        'a: 'b,
+    {
         let mut sum = self.bias;
         for (w, x) in self.weight.iter().zip(input) {
-            sum = sum + *w * x;
+            // Here it is essential that the operations happen in this order.
+            // x has lifetime 'b and w and the initial sum have lifetime 'a.
+            // We want our output to have lifetime 'b and results of operations
+            // take on the lifetime of the left operand, so we need to make
+            // sure x is on the left.
+            sum = x * *w + sum;
         }
         sum.tanh()
     }
@@ -275,10 +294,13 @@ impl<'a> Layer<'a> {
         Self { neurons }
     }
 
-    pub fn forward(
+    pub fn forward<'b>(
         &'a self,
-        input: impl IntoIterator<Item = Value<'a>> + Clone,
-    ) -> impl Iterator<Item = Value<'a>> {
+        input: impl IntoIterator<Item = Value<'b>> + Clone,
+    ) -> impl Iterator<Item = Value<'b>>
+    where
+        'a: 'b,
+    {
         self.neurons.iter().map(move |n| n.forward(input.clone()))
     }
 
@@ -298,7 +320,13 @@ impl<'a> MLP<'a> {
         Self { layers }
     }
 
-    pub fn forward(&'a self, input: impl IntoIterator<Item = Value<'a>> + Clone) -> Vec<Value<'a>> {
+    pub fn forward<'b>(
+        &'a self,
+        input: impl IntoIterator<Item = Value<'b>> + Clone,
+    ) -> Vec<Value<'b>>
+    where
+        'a: 'b,
+    {
         let mut output = Vec::new();
         let mut input = self.layers[0].forward(input).collect::<Vec<_>>();
 

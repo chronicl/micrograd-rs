@@ -17,15 +17,15 @@ fn main() {
     const BATCHES: usize = 1000;
     let mut i = 0;
     let (loss, predictions) = loop {
-        // Our training data should be allocated in a separate Bump here inside the loop,
-        // because otherwise it's memory will never be freed. But since we are using limited
-        // memory in this example, we are just using our MLP Bump here.
+        // Using a new bump for everything that is allocated within this iteration step.
+        // The bump is deallocated at the end of the iteration step and so are all created values.
+        // Note that the MLP is allocated on the bump outside of the loop and thus is not deallocated.
+        let bump = Bump::new();
 
         let ys_pred: Vec<_> = xs
             .into_iter()
             .flat_map(|x| mlp.forward(x.iter().map(|&x| Value::new(x, &bump))))
             .collect();
-        // let ys_pred_f = ys_pred.iter().map(|y| y.data()).collect::<Vec<_>>();
 
         let ys = ys.iter().map(|&y| Value::new(y, &bump));
         let loss = ys_pred
